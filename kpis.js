@@ -1,32 +1,59 @@
-async function carregarJSON(caminho) {
-    const resposta = await fetch(caminho + '?v=' + new Date().getTime());
-    if (!resposta.ok) {
-        throw new Error(`Erro ao carregar ${caminho}`);
-    }
-    return resposta.json();
-}
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('✅ kpis.js carregado');
 
-async function atualizarKPIs() {
-    try {
-        const faturamento = await carregarJSON('dados/kpi_faturamento.json');
-        const pedidos = await carregarJSON('dados/kpi_quantidade_pedidos.json');
-        const ticket = await carregarJSON('dados/kpi_ticket_medio.json');
+  const BASE = 'site/dados/';
 
-        document.getElementById('fat_atual').innerText =
-            faturamento.atual.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  function el(id) {
+    const e = document.getElementById(id);
+    if (!e) console.error('❌ ID não encontrado:', id);
+    return e;
+  }
 
-        document.getElementById('fat_variacao').innerText =
-            faturamento.variacao !== null ? `${faturamento.variacao}%` : '-';
+  function dinheiro(v) {
+    if (v === null || v === undefined) return '--';
+    return 'R$ ' + Number(v).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2
+    });
+  }
 
-        document.getElementById('qtd_pedidos').innerText = pedidos.atual;
+  /* ================================
+     FATURAMENTO
+  ================================= */
+  fetch(BASE + 'kpi_faturamento.json', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(fat => {
+      console.log('📦 faturamento:', fat);
 
-        document.getElementById('ticket_medio').innerText =
-            ticket.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      el('fatAtual').innerText = dinheiro(fat.atual);
+      el('periodoAtual').innerText = `(até ${fat.data_fim})`;
 
-    } catch (erro) {
-        console.error('Erro ao atualizar KPIs:', erro);
-    }
-}
+      el('fatAnoAnterior').innerText = dinheiro(fat.ano_anterior);
+      el('periodoAnterior').innerText =
+        `(até ${fat.data_fim.replace('2026', '2025')})`;
 
-atualizarKPIs();
-setInterval(atualizarKPIs, 60000); // atualiza a cada 1 minuto
+      el('fatVariacao').innerText =
+        fat.variacao !== null
+          ? `▲ ${fat.variacao.toFixed(1)}% vs ano anterior`
+          : '--';
+    })
+    .catch(err => console.error('🔥 Erro faturamento:', err));
+
+  /* ================================
+     QUANTIDADE DE PEDIDOS
+  ================================= */
+  fetch(BASE + 'kpi_quantidade_pedidos.json', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(qtd => {
+      console.log('📦 quantidade:', qtd);
+
+      el('qtdAtual').innerText = `${qtd.atual} pedidos`;
+      el('qtdAnoAnterior').innerText = `${qtd.ano_anterior} pedidos`;
+    })
+    .catch(err => console.error('🔥 Erro quantidade:', err));
+
+  /* ================================
+     META (placeholder)
+  ================================= */
+  el('fatMeta').innerText = 'Meta mês: --';
+  el('fatMetaPerc').innerText = '--';
+});
