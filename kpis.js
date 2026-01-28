@@ -1,52 +1,41 @@
-async function atualizarKPIs() {
-  try {
-    const fat = await fetch("site/dados/kpi_faturamento.json").then(r => r.json());
-    const qtd = await fetch("site/dados/kpi_quantidade_pedidos.json").then(r => r.json());
+fetch('dados/kpi_faturamento.json')
+  .then(response => response.json())
+  .then(data => {
 
-    // ===== SLIDE 1 =====
-    document.getElementById("fatAtual").innerText =
-      fat.atual.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    document.getElementById('fatAtual').innerText =
+      `R$ ${data.atual.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de 01/01/2026 até ${data.data_atual}`;
 
-    document.getElementById("qtdAtual").innerText =
-      `${qtd.atual} pedidos`;
+    document.getElementById('qtdAtual').innerText =
+      `${data.qtd_atual} pedidos`;
 
-    document.getElementById("periodoAtual").innerText =
-      `até ${fat.data_fim}`;
+    document.getElementById('fatAnoAnterior').innerText =
+      `R$ ${data.ano_anterior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de 01/01/2025 até ${data.data_ano_anterior}`;
 
-    document.getElementById("fatAnoAnterior").innerText =
-      fat.ano_anterior.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    document.getElementById('qtdAnoAnterior').innerText =
+      `${data.qtd_ano_anterior} pedidos`;
 
-    document.getElementById("qtdAnoAnterior").innerText =
-      `${qtd.ano_anterior} pedidos`;
+    const variacaoEl = document.getElementById('fatVariacao');
+    const perc = Number(data.variacao);
 
-    document.getElementById("periodoAnterior").innerText =
-      `até ${fat.data_ano_anterior || "mesmo período"}`;
+    if (perc >= 0) {
+      variacaoEl.className = 'variacao positivo';
+      variacaoEl.innerText = `▲ ${perc}% vs ano anterior`;
+    } else {
+      variacaoEl.className = 'variacao negativo';
+      variacaoEl.innerText = `▼ ${Math.abs(perc)}% vs ano anterior`;
+    }
 
-    const variacao = document.getElementById("fatVariacao");
-    variacao.innerText = `${fat.variacao}% vs ano anterior`;
-    variacao.className = "box variacao " + (fat.variacao >= 0 ? "positivo" : "negativo");
+    document.getElementById('fatMeta').innerText =
+      `Meta mês: R$ ${data.meta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 
-    // ===== SLIDE 2 (META FIXA POR ENQUANTO) =====
-    const META = 1325000;
-    const perc = ((fat.atual / META) * 100).toFixed(1);
+    const metaPercEl = document.getElementById('fatMetaPerc');
+    metaPercEl.innerText = `🎯 ${data.meta_perc}% da meta`;
 
-    document.getElementById("fatMeta").innerText =
-      META.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-
-    document.getElementById("fatMetaPerc").innerText =
-      `${perc}% da meta`;
-
-    // ===== SLIDE 3 =====
-    document.getElementById("resumoFat").innerText =
-      fat.atual.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-
-    document.getElementById("resumoQtd").innerText =
-      `${qtd.atual} pedidos`;
-
-  } catch (e) {
-    console.error("Erro ao atualizar KPIs:", e);
-  }
-}
-
-atualizarKPIs();
-setInterval(atualizarKPIs, 60000);
+    if (data.meta_perc >= 100) {
+      metaPercEl.className = 'meta-perc ok';
+    } else if (data.meta_perc >= 80) {
+      metaPercEl.className = 'meta-perc atencao';
+    } else {
+      metaPercEl.className = 'meta-perc ruim';
+    }
+  });

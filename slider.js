@@ -1,8 +1,15 @@
-let slideAtual = 0;
-const slides = document.querySelectorAll(".slide");
+document.addEventListener("DOMContentLoaded", () => {
 
-setInterval(() => {
-  slides[slideAtual].classList.remove("ativo");
-  slideAtual = (slideAtual + 1) % slides.length;
-  slides[slideAtual].classList.add("ativo");
-}, 10000);
+  const slides = document.querySelectorAll(".slide");
+  let index = 0;
+
+  function trocar() {
+    slides.forEach(s => s.classList.remove("active"));
+    slides[index].classList.add("active");
+    index = (index + 1) % slides.length;
+  }
+
+  trocar();
+  setInterval(trocar, 5000);
+
+});
