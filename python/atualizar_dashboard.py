@@ -42,8 +42,10 @@ df = df[df.iloc[:, COL_TIPO].astype(str).str.upper().str.strip() == "NORMAL"]
 print(f"✅ NORMAL: {len(df)} linhas")
 
 # ======================================================
-# TRATAR DATA
+# CRIAR COLUNAS EXPLÍCITAS (EVITA FutureWarning)
 # ======================================================
+df["PEDIDO"] = df.iloc[:, COL_PEDIDO]
+
 df["DATA_OK"] = pd.to_datetime(
     df.iloc[:, COL_DATA],
     errors="coerce",
@@ -51,9 +53,6 @@ df["DATA_OK"] = pd.to_datetime(
 )
 df = df.dropna(subset=["DATA_OK"])
 
-# ======================================================
-# CRIAR COLUNA ANO (EVITA FutureWarning)
-# ======================================================
 df["ANO"] = df["DATA_OK"].dt.year
 
 # ======================================================
@@ -77,13 +76,13 @@ df["VALOR_OK"] = df.iloc[:, COL_VALOR].apply(converter_valor)
 # ======================================================
 df_pedidos = (
     df.groupby(
-        [df.iloc[:, COL_PEDIDO], "ANO"],
+        ["PEDIDO", "ANO"],
         as_index=False
     )
-    .agg({
-        "VALOR_OK": "max",
-        "DATA_OK": "min"
-    })
+    .agg(
+        VALOR_OK=("VALOR_OK", "max"),
+        DATA_OK=("DATA_OK", "min")
+    )
 )
 
 # ======================================================
