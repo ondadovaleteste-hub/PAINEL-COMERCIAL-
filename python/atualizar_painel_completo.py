@@ -1,196 +1,219 @@
 import pandas as pd
 import json
-import os
 from datetime import datetime, timedelta
+import os
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CAMINHO_EXCEL = os.path.join(BASE_DIR, "..", "excel", "PEDIDOS ONDA.xlsx")
-CAMINHO_DADOS = os.path.join(BASE_DIR, "..", "dados")
-CAMINHO_SITE = os.path.join(BASE_DIR, "..", "site", "dados")
+CAMINHO_EXCEL = "excel/PEDIDOS ONDA.xlsx"
+CAMINHO_DADOS = "dados/"
+CAMINHO_SITE = "site/dados/"
 
-# ============================================================
-# FUNÇÃO CORRIGIDA PARA CARREGAR O EXCEL (ACEITA QUALQUER "DATA")
-# ============================================================
+# ==========================================================
+#  CARREGAR EXCEL
+# ==========================================================
 def carregar_excel():
+    if not os.path.exists(CAMINHO_EXCEL):
+        raise Exception("❌ Arquivo PEDIDOS ONDA.xlsx não encontrado!")
+
     df = pd.read_excel(CAMINHO_EXCEL)
 
-    # Normalizar nomes
-    df.columns = df.columns.str.strip().str.upper()
+    # Normaliza os nomes das colunas
+    df.columns = [str(c).strip().upper() for c in df.columns]
 
-    # Procurar qualquer coluna que contenha "DATA"
-    col_data = None
-    for col in df.columns:
-        if "DATA" in col:
-            col_data = col
-            break
-
-    if not col_data:
+    if "DATA" not in df.columns:
         raise Exception("❌ A coluna 'DATA' não foi encontrada no Excel.")
 
-    # Converter para datetime
-    df[col_data] = pd.to_datetime(df[col_data], errors="coerce")
-    df = df.dropna(subset=[col_data])
+    # Converte DATA
+    df["DATA"] = pd.to_datetime(df["DATA"], errors="coerce")
 
-    # Padronizar nome interno
-    df = df.rename(columns={col_data: "DATA"})
+    # Normaliza coluna de valores com IPI
+    col_valor = None
+    for nome in df.columns:
+        if nome.startswith("VALOR COM IPI"):
+            col_valor = nome
+            break
+
+    if not col_valor:
+        raise Exception("❌ A coluna de Valor Com IPI não foi encontrada!")
+
+    df["VALOR_COM_IPI"] = df[col_valor]
+
+    # Normaliza KG
+    if "KG" not in df.columns:
+        raise Exception("❌ A coluna 'KG' não existe no Excel.")
+
+    df["KG"] = pd.to_numeric(df["KG"], errors="coerce").fillna(0)
+
+    # Normaliza M2
+    col_m2 = None
+    for nome in df.columns:
+        if nome.startswith("TOTAL M2") or nome.startswith("TOTAL M²") or nome.startswith("TOTAL M2".upper()):
+            col_m2 = nome
+            break
+
+    if not col_m2:
+        raise Exception("❌ A coluna de M² não foi encontrada!")
+
+    df["M2"] = pd.to_numeric(df[col_m2], errors="coerce").fillna(0)
 
     return df
 
 
-# ============================================================
-# ENCONTRAR A ÚLTIMA DATA VÁLIDA DO MÊS
-# ============================================================
-def ultima_data_valida(df):
-    hoje = datetime.now().date()
+# ==========================================================
+# IDENTIFICAR A ÚLTIMA DATA VÁLIDA DO MÊS
+# ==========================================================
+def obter_ultima_data(df):
+    datas_validas = df["DATA"].dropna().sort_values()
 
-    # ① Primeiro tenta pegar pedidos do dia
-    df_hoje = df[df["DATA"].dt.date == hoje]
-    if len(df_hoje) > 0:
-        return hoje
+    if datas_validas.empty:
+        raise Exception("❌ Nenhuma data válida encontrada no Excel.")
 
-    # ② Depois o dia imediatamente anterior
-    for i in range(1, 10):
-        dia = hoje - timedelta(days=i)
-        df_dia = df[df["DATA"].dt.date == dia]
-        if len(df_dia) > 0:
-            return dia
+    # Data mais recente no arquivo
+    ultima = datas_validas.max()
 
-    # ③ Caso seja início de mês e não existam pedidos, pega o PRIMEIRO dia com pedido no mês
-    mes_atual = hoje.month
-    ano_atual = hoje.year
-    df_mes = df[(df["DATA"].dt.month == mes_atual) & (df["DATA"].dt.year == ano_atual)]
-
-    if len(df_mes) > 0:
-        return df_mes["DATA"].dt.date.min()
-
-    # ④ Último recurso
-    return df["DATA"].dt.date.max()
+    return ultima
 
 
-# ============================================================
-# CALCULAR KPIS PADRÃO
-# ============================================================
+# ==========================================================
+# FUNÇÕES DE FILTRO
+# ==========================================================
+def filtrar_periodo(df, data_final):
+    ano = data_final.year
+    mes = data_final.month
+    dt_ini = datetime(ano, mes, 1)
+
+    return df[(df["DATA"] >= dt_ini) & (df["DATA"] <= data_final)]
+
+
+def filtrar_periodo_ano_anterior(df, data_final):
+    dt_ini = datetime(data_final.year - 1, data_final.month, 1)
+    dt_fim = datetime(data_final.year - 1, data_final.month, data_final.day)
+    return df[(df["DATA"] >= dt_ini) & (df["DATA"] <= dt_fim)]
+
+
+# ==========================================================
+# CALCULAR KPIS (PADRÃO)
+# ==========================================================
 def calcular_kpis_padrao(df, data_ref):
-    df_atual = df[df["DATA"].dt.date == data_ref]
+    df_atual = filtrar_periodo(df, data_ref)
+    df_ant = filtrar_periodo_ano_anterior(df, data_ref)
 
-    data_ano_anterior = data_ref.replace(year=data_ref.year - 1)
-    df_anterior = df[df["DATA"].dt.date == data_ano_anterior]
+    soma_atual = df_atual["VALOR_COM_IPI"].sum()
+    soma_ant = df_ant["VALOR_COM_IPI"].sum()
 
-    def soma(df):
-        return df["VALOR TOTAL C/ IPI"].sum()
+    qtd_atual = df_atual["PEDIDO"].nunique()
+    qtd_ant = df_ant["PEDIDO"].nunique()
 
-    def kg(df):
-        return df["KG"].sum()
-
-    atual = soma(df_atual)
-    anterior = soma(df_anterior)
-
-    kg_atual = kg(df_atual)
-    kg_anterior = kg(df_anterior)
-
-    qtd_atual = len(df_atual)
-    qtd_anterior = len(df_anterior)
-
-    def variacao(a, b):
-        if b == 0:
-            return 0
-        return ((a - b) / b) * 100
-
-    return {
-        "faturamento": {
-            "atual": round(atual, 2),
-            "ano_anterior": round(anterior, 2),
-            "variacao": round(variacao(atual, anterior), 2),
-            "data_atual": data_ref.strftime("%d/%m/%Y"),
-            "data_ano_anterior": data_ano_anterior.strftime("%d/%m/%Y"),
-        },
-        "kg_total": {
-            "atual": round(kg_atual, 2),
-            "ano_anterior": round(kg_anterior, 2),
-            "variacao": round(variacao(kg_atual, kg_anterior), 2),
-        },
-        "quantidade": {
-            "atual": qtd_atual,
-            "ano_anterior": qtd_anterior,
-            "variacao": round(variacao(qtd_atual, qtd_anterior), 2),
-        },
-        "ticket": {
-            "atual": round(atual / qtd_atual, 2) if qtd_atual else 0,
-            "ano_anterior": round(anterior / qtd_anterior, 2) if qtd_anterior else 0,
-            "variacao": round(
-                variacao(
-                    round(atual / qtd_atual, 2) if qtd_atual else 0,
-                    round(anterior / qtd_anterior, 2) if qtd_anterior else 0,
-                ),
-                2,
-            ),
-        },
-    }
-
-
-# ============================================================
-# GERAR JSON INDIVIDUAL
-# ============================================================
-def salvar_json(nome, dados):
-    with open(os.path.join(CAMINHO_DADOS, nome), "w", encoding="utf-8") as f:
-        json.dump(dados, f, indent=4, ensure_ascii=False)
-
-    with open(os.path.join(CAMINHO_SITE, nome), "w", encoding="utf-8") as f:
-        json.dump(dados, f, indent=4, ensure_ascii=False)
-
-
-# ============================================================
-# PREÇO MÉDIO KG / M2
-# ============================================================
-def salvar_preco_medio(df):
-    total_kg = df["KG"].sum()
-    total_m2 = df["M2"].sum() if "M2" in df.columns else 0
-    total_valor = df["VALOR TOTAL C/ IPI"].sum()
-
-    preco_kg = total_valor / total_kg if total_kg else 0
-    preco_m2 = total_valor / total_m2 if total_m2 else 0
+    variacao = ((soma_atual - soma_ant) / soma_ant * 100) if soma_ant > 0 else 0
 
     dados = {
-        "preco_medio_kg": round(preco_kg, 2),
-        "preco_medio_m2": round(preco_m2, 2),
-        "total_kg": round(total_kg, 2),
-        "total_m2": round(total_m2, 2),
-        "data": datetime.now().strftime("%d/%m/%Y"),
+        "atual": float(soma_atual),
+        "ano_anterior": float(soma_ant),
+        "variacao": round(float(variacao), 1),
+        "data_atual": data_ref.strftime("%d/%m/%Y"),
+        "data_ano_anterior": (data_ref.replace(year=data_ref.year -1)).strftime("%d/%m/%Y"),
+        "qtd_atual": int(qtd_atual),
+        "qtd_ano_anterior": int(qtd_ant),
     }
 
-    salvar_json("kpi_preco_medio.json", dados)
-
-    print("Preço médio gerado:")
-    print(json.dumps(dados, indent=2, ensure_ascii=False))
+    return dados
 
 
-# ============================================================
-# PROCESSAMENTO PRINCIPAL
-# ============================================================
+# ==========================================================
+# CALCULAR KG, M2, PREÇO MÉDIO
+# ==========================================================
+def calcular_preco_medio(df, data_ref):
+    df_mes = filtrar_periodo(df, data_ref)
+
+    total_kg = df_mes["KG"].sum()
+    total_m2 = df_mes["M2"].sum()
+    total_valor = df_mes["VALOR_COM_IPI"].sum()
+
+    preco_kg = (total_valor / total_kg) if total_kg > 0 else 0
+    preco_m2 = (total_valor / total_m2) if total_m2 > 0 else 0
+
+    dados = {
+        "preco_medio_kg": round(float(preco_kg), 2),
+        "preco_medio_m2": round(float(preco_m2), 2),
+        "total_kg": float(total_kg),
+        "total_m2": float(total_m2),
+        "data": data_ref.strftime("%d/%m/%Y")
+    }
+
+    return dados
+
+
+# ==========================================================
+# SALVAR JSON
+# ==========================================================
+def salvar_json(nome, conteudo):
+    caminho1 = os.path.join(CAMINHO_DADOS, nome)
+    caminho2 = os.path.join(CAMINHO_SITE, nome)
+
+    with open(caminho1, "w", encoding="utf-8") as f:
+        json.dump(conteudo, f, indent=2, ensure_ascii=False)
+
+    with open(caminho2, "w", encoding="utf-8") as f:
+        json.dump(conteudo, f, indent=2, ensure_ascii=False)
+
+    print(f"✔ JSON gerado: {nome}")
+
+
+# ==========================================================
+# EXECUTAR
+# ==========================================================
 def calcular_kpis():
     df = carregar_excel()
-    data_ref = ultima_data_valida(df)
 
-    print("📅 Última data encontrada no Excel:", data_ref)
+    data_ref = obter_ultima_data(df)
 
+    print(f"📅 Última data encontrada no Excel: {data_ref.date()}")
+
+    # FATURAMENTO
     kpis = calcular_kpis_padrao(df, data_ref)
+    salvar_json("kpi_faturamento.json", kpis)
 
-    salvar_json("kpi_faturamento.json", {
-        **kpis["faturamento"],
-        "atual_qtd": kpis["quantidade"]["atual"],
-        "ano_anterior_qtd": kpis["quantidade"]["ano_anterior"],
-    })
+    # KG TOTAL
+    df_atual = filtrar_periodo(df, data_ref)
+    kg_atual = df_atual["KG"].sum()
 
-    salvar_json("kpi_quantidade_pedidos.json", kpis["quantidade"])
-    salvar_json("kpi_ticket_medio.json", kpis["ticket"])
-    salvar_json("kpi_kg_total.json", kpis["kg_total"])
+    df_ant = filtrar_periodo_ano_anterior(df, data_ref)
+    kg_ant = df_ant["KG"].sum()
 
-    salvar_preco_medio(df)
+    variacao_kg = ((kg_atual - kg_ant) / kg_ant * 100) if kg_ant > 0 else 0
+
+    dados_kg = {
+        "atual": round(float(kg_atual), 2),
+        "ano_anterior": round(float(kg_ant), 2),
+        "variacao": round(float(variacao_kg), 1)
+    }
+    salvar_json("kpi_kg_total.json", dados_kg)
+
+    # QUANTIDADE DE PEDIDOS
+    dados_pedidos = {
+        "atual": int(df_atual["PEDIDO"].nunique()),
+        "ano_anterior": int(df_ant["PEDIDO"].nunique()),
+        "variacao": round(
+            ((df_atual["PEDIDO"].nunique() - df_ant["PEDIDO"].nunique())
+             / df_ant["PEDIDO"].nunique() * 100)
+            if df_ant["PEDIDO"].nunique() > 0 else 0, 1)
+    }
+    salvar_json("kpi_quantidade_pedidos.json", dados_pedidos)
+
+    # TICKET MÉDIO
+    ticket_atual = kpis["atual"] / dados_pedidos["atual"] if dados_pedidos["atual"] > 0 else 0
+    ticket_ant = kpis["ano_anterior"] / dados_pedidos["ano_anterior"] if dados_pedidos["ano_anterior"] > 0 else 0
+    ticket_var = ((ticket_atual - ticket_ant) / ticket_ant * 100) if ticket_ant > 0 else 0
+
+    dados_ticket = {
+        "atual": round(float(ticket_atual), 2),
+        "ano_anterior": round(float(ticket_ant), 2),
+        "variacao": round(float(ticket_var), 1)
+    }
+    salvar_json("kpi_ticket_medio.json", dados_ticket)
+
+    # PREÇO MÉDIO
+    salvar_json("kpi_preco_medio.json", calcular_preco_medio(df, data_ref))
 
 
-# ============================================================
-# EXECUÇÃO
-# ============================================================
 if __name__ == "__main__":
     calcular_kpis()
-    print("\nKPIs gerados com sucesso!\n")
