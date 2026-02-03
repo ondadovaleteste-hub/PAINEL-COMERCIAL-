@@ -8,38 +8,25 @@ from datetime import datetime
 # 🔥 FUNÇÃO DEFINITIVA PARA LER NÚMEROS BRASILEIROS
 # ======================================================
 def limpar_numero(valor):
-    """
-    Converte valores brasileiros para float corretamente.
-    Aceita:
-    - "1.234.567,89"
-    - "1.234"
-    - "1,234"
-    - "1234"
-    - "R$ 1.234,99"
-    """
-
     if pd.isna(valor):
         return 0.0
 
     v = str(valor).strip()
-
-    # Remove tudo exceto números, ponto e vírgula
     v = re.sub(r"[^0-9,.-]", "", v)
 
-    # EXCEÇÃO: número vazio após limpeza
     if v in ["", "-", ",", ".", ",-", ".-"]:
         return 0.0
 
-    # Caso tenha "." e "," → formato “1.234.567,89”
+    # Caso com milhares + vírgula decimal (ex: 1.234.567,89)
     if "." in v and "," in v:
-        v = v.replace(".", "")       # remove pontos
-        v = v.replace(",", ".")      # troca vírgula decimal
+        v = v.replace(".", "")
+        v = v.replace(",", ".")
         try:
             return float(v)
         except:
             return 0.0
 
-    # Caso tenha apenas vírgula → formato “123,45”
+    # Apenas vírgula decimal
     if "," in v and "." not in v:
         v = v.replace(",", ".")
         try:
@@ -47,24 +34,16 @@ def limpar_numero(valor):
         except:
             return 0.0
 
-    # Caso tenha apenas ponto:
-    # *Se a parte após o ponto tiver 3 dígitos → é milhar, remover ponto*
-    # *Se tiver 1 ou 2 dígitos → decimal*
+    # Apenas ponto -> verificar se é milhares ou decimal
     if "." in v and "," not in v:
         partes = v.split(".")
-        if len(partes[-1]) == 3:  # ex: 12.345
+        if len(partes[-1]) == 3:  # 12.345 → remover ponto
             v = v.replace(".", "")
-            try:
-                return float(v)
-            except:
-                return 0.0
-        else:  # ex: 123.4 → decimal
-            try:
-                return float(v)
-            except:
-                return 0.0
+        try:
+            return float(v)
+        except:
+            return 0.0
 
-    # Último caso → número limpo puro
     try:
         return float(v)
     except:
@@ -79,6 +58,22 @@ def carregar_excel():
 
     df.columns = df.columns.str.strip().str.upper()
 
+    # 🔥 PRINCIPAL CORREÇÃO:
+    # Aceitar qualquer variação existente no Excel:
+    possiveis_colunas = ["VALOR COM IPI", "VALOR COM IPI ", "VALOR  COM  IPI", "VALOR COM I.P.I"]
+    nome_valor_ipi = None
+
+    for c in df.columns:
+        if "VALOR" in c and "IPI" in c:
+            nome_valor_ipi = c
+            break
+
+    if nome_valor_ipi is None:
+        raise Exception("❌ Não encontrei a coluna de VALOR COM IPI no Excel!")
+
+    # Padroniza para um único nome interno
+    df = df.rename(columns={nome_valor_ipi: "VALOR COM IPI"})
+
     obrigatorias = ["DATA", "VALOR COM IPI", "KG", "TOTAL M2"]
     for c in obrigatorias:
         if c not in df.columns:
@@ -86,7 +81,6 @@ def carregar_excel():
 
     df["DATA"] = pd.to_datetime(df["DATA"], errors="coerce")
 
-    # Agora sim — limpeza perfeita
     df["VALOR COM IPI"] = df["VALOR COM IPI"].apply(limpar_numero)
     df["KG"] = df["KG"].apply(limpar_numero)
     df["TOTAL M2"] = df["TOTAL M2"].apply(limpar_numero)
@@ -178,11 +172,12 @@ def calcular_preco_medio(df, data_ref):
 
 
 # ======================================================
-# SALVAR ARQUIVOS JSON
+# SALVAR JSON
 # ======================================================
 def salvar(nome, dados):
     with open(f"dados/{nome}", "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
+
     with open(f"site/dados/{nome}", "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
 
