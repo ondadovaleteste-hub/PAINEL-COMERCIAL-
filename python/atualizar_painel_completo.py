@@ -6,14 +6,13 @@ from datetime import datetime
 CAMINHO_EXCEL = "excel/PEDIDOS ONDA.xlsx"
 
 # ======================================================
-# LIMPA NÚMEROS BRASILEIROS (NÃO USADO PARA PEDIDO!)
+# LIMPA NÚMEROS BRASILEIROS
 # ======================================================
 def limpar_numero(v):
     if pd.isna(v):
         return 0.0
 
     v = str(v).strip()
-
     v = re.sub(r"[^0-9,.-]", "", v)
 
     if v in ["", "-", ".", ","]:
@@ -43,14 +42,11 @@ def carregar():
         if c not in df.columns:
             raise Exception(f"Faltando coluna: {c}")
 
-    # datas
     df["DATA"] = pd.to_datetime(df["DATA"], errors="coerce")
     df = df[df["DATA"].notna()]
 
-    # TRATAR PEDIDO COMO STRING SEMPRE
     df["PEDIDO"] = df["PEDIDO"].astype(str).str.strip()
 
-    # limpar numéricos (somente onde necessário!)
     df["VALOR COM IPI"] = df["VALOR COM IPI"].apply(limpar_numero)
     df["KG"] = df["KG"].apply(limpar_numero)
     df["TOTAL M2"] = df["TOTAL M2"].apply(limpar_numero)
@@ -72,11 +68,12 @@ def calcular(df):
 
     primeira_real = df_mes["DATA"].min()
 
-    # Para exibição no site → sempre 01/MM
+    # 📌 Para EXIBIÇÃO: sempre 01/MM/AAAA
+    data_hoje = datetime.now()
     inicio_exib = datetime(ano, mes, 1)
     inicio_exib_ant = datetime(ano - 1, mes, 1)
 
-    # Filtragem real
+    # 📌 Para cálculo: datas reais válidas
     df_periodo = df[(df["DATA"] >= primeira_real) & (df["DATA"] <= ultima)]
 
     qtd = df_periodo["PEDIDO"].nunique()
@@ -84,12 +81,11 @@ def calcular(df):
     kg = df_periodo["KG"].sum()
     m2 = df_periodo["TOTAL M2"].sum()
 
-    # Ano anterior
+    # Ano anterior (mesmas datas reais só que ano-1)
     primeira_ant = primeira_real.replace(year=ano - 1)
     ultima_ant = ultima.replace(year=ano - 1)
 
     df_ant = df[(df["DATA"] >= primeira_ant) & (df["DATA"] <= ultima_ant)]
-
     qtd_ant = df_ant["PEDIDO"].nunique()
     total_ant = df_ant["VALOR COM IPI"].sum()
     kg_ant = df_ant["KG"].sum()
@@ -101,7 +97,7 @@ def calcular(df):
             "ano_anterior": round(total_ant, 2),
             "variacao": ((total / total_ant) - 1) * 100 if total_ant else 0,
             "inicio_mes": inicio_exib.strftime("%d/%m/%Y"),
-            "data_atual": ultima.strftime("%d/%m/%Y"),
+            "data_atual": data_hoje.strftime("%d/%m/%Y"),
             "inicio_mes_anterior": inicio_exib_ant.strftime("%d/%m/%Y"),
             "data_ano_anterior": ultima_ant.strftime("%d/%m/%Y")
         },
@@ -125,7 +121,7 @@ def calcular(df):
             "preco_medio_m2": round(total / m2, 2) if m2 else 0,
             "total_kg": round(kg, 2),
             "total_m2": round(m2, 2),
-            "data": ultima.strftime("%d/%m/%Y")
+            "data": data_hoje.strftime("%d/%m/%Y")
         }
     }
 
@@ -155,4 +151,4 @@ if __name__ == "__main__":
 
     print("✓ JSON atualizado corretamente!")
     print("Pedidos atuais:", res["qtd"]["atual"])
-    print("Período mostrado no site:", res["fat"]["inicio_mes"], "→", res["fat"]["data_atual"])
+    print("📅 Mostrando no site:", res["fat"]["inicio_mes"], "→", res["fat"]["data_atual"])
