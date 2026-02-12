@@ -5,24 +5,16 @@ function carregarJSON(nome) {
 }
 
 function formatarMoeda(v) {
-  if (typeof v !== "number") return "--";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return (v ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-function formatarNumero2(v) {
-  if (typeof v !== "number") return "--";
-  return v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
-}
-
-// KG sem casas decimais (como você pediu)
-function formatarKG(v) {
-  if (typeof v !== "number") return "--";
-  return v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+function formatarNumero(v, casas = 2) {
+  return (v ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: casas });
 }
 
 function formatarPercentual(v) {
-  if (typeof v !== "number") return "--";
-  return v.toFixed(1).replace(".", ",") + "%";
+  const n = Number(v ?? 0);
+  return n.toFixed(1).replace(".", ",") + "%";
 }
 
 function aplicarCorPosNeg(el, valor) {
@@ -31,30 +23,50 @@ function aplicarCorPosNeg(el, valor) {
   if (valor < 0) el.classList.add("negativo");
 }
 
+function obterMesDeDataBR(dataBR) {
+  // "05/02/2026" -> 2
+  if (!dataBR || typeof dataBR !== "string" || dataBR.length < 10) return null;
+  const mes = Number(dataBR.substring(3, 5));
+  return Number.isFinite(mes) ? mes : null;
+}
+
 Promise.all([
   carregarJSON("kpi_faturamento.json"),
   carregarJSON("kpi_quantidade_pedidos.json"),
   carregarJSON("kpi_ticket_medio.json"),
   carregarJSON("kpi_kg_total.json"),
   carregarJSON("kpi_preco_medio.json")
-]).then(([fat, qtd, ticket, kg, preco]) => {
+]).then(([fat, qtd, ticket, kg, precoRaw]) => {
+  if (!fat || !qtd || !ticket || !kg || !precoRaw) {
+    console.error("❌ Falha ao carregar algum JSON:", { fat, qtd, ticket, kg, precoRaw });
+    return;
+  }
 
-  // Segurança
-  if (!fat || !qtd || !ticket || !kg || !preco) return;
+  // ======================================================
+  // NORMALIZAÇÃO DO PREÇO MÉDIO (ACEITA FORMATO NOVO E ANTIGO)
+  // - Novo: { atual: {...}, ano_anterior: {...} }
+  // - Antigo: { preco_medio_kg, preco_medio_m2, ... }
+  // ======================================================
+  const preco = {
+    atual: precoRaw.atual ? precoRaw.atual : precoRaw,
+    ano_anterior: precoRaw.ano_anterior ? precoRaw.ano_anterior : null
+  };
 
   /* ================= SLIDE 1 – FATURAMENTO ================= */
-  document.getElementById("fatQtdAtual").innerText = qtd.atual + " pedidos";
+  document.getElementById("fatQtdAtual").innerText = (qtd.atual ?? "--") + " pedidos";
   document.getElementById("fatValorAtual").innerText = formatarMoeda(fat.atual);
-  document.getElementById("fatDataAtual").innerText = "de " + fat.inicio_mes + " até " + fat.data_atual;
+  document.getElementById("fatDataAtual").innerText =
+    "de " + (fat.inicio_mes ?? "--") + " até " + (fat.data_atual ?? "--");
 
-  document.getElementById("fatQtdAnterior").innerText = qtd.ano_anterior + " pedidos";
+  document.getElementById("fatQtdAnterior").innerText = (qtd.ano_anterior ?? "--") + " pedidos";
   document.getElementById("fatValorAnterior").innerText = formatarMoeda(fat.ano_anterior);
-  document.getElementById("fatDataAnterior").innerText = "de " + fat.inicio_mes_anterior + " até " + fat.data_ano_anterior;
+  document.getElementById("fatDataAnterior").innerText =
+    "de " + (fat.inicio_mes_anterior ?? "--") + " até " + (fat.data_ano_anterior ?? "--");
 
   const elFatVar = document.getElementById("fatVariacao");
-  const pfFat = fat.variacao >= 0 ? "▲" : "▼";
-  elFatVar.innerText = `${pfFat} ${formatarPercentual(Math.abs(fat.variacao))} vs ano anterior`;
-  aplicarCorPosNeg(elFatVar, fat.variacao);
+  const pfFat = (fat.variacao ?? 0) >= 0 ? "▲" : "▼";
+  elFatVar.innerText = `${pfFat} ${formatarPercentual(Math.abs(fat.variacao ?? 0))} vs ano anterior`;
+  aplicarCorPosNeg(elFatVar, fat.variacao ?? 0);
 
   /* ===== META FATURAMENTO ===== */
   const METAS = {
@@ -72,87 +84,104 @@ Promise.all([
     12: { kg: 98000, fat: 1409516.02 }
   };
 
-  const mes = Number((fat.data_atual || "01/01/2000").substring(3, 5));
-  const metaFat = METAS[mes]?.fat ?? 0;
-  const metaFatPerc = metaFat > 0 ? (fat.atual / metaFat) * 100 : 0;
+  const mes = obterMesDeDataBR(fat.data_atual);
+  if (mes && METAS[mes]) {
+    const metaFat = METAS[mes].fat;
+    const metaFatPerc = (fat.atual / metaFat) * 100;
 
-  document.getElementById("fatMetaValor").innerText =
-    metaFat > 0 ? ("Meta mês: " + formatarMoeda(metaFat)) : "Meta mês: --";
+    document.getElementById("fatMetaValor").innerText = "Meta mês: " + formatarMoeda(metaFat);
 
-  const elFatMetaPerc = document.getElementById("fatMetaPerc");
-  elFatMetaPerc.innerText =
-    metaFat > 0 ? ("🎯 " + metaFatPerc.toFixed(1).replace(".", ",") + "% da meta") : "🎯 -- % da meta";
+    const elFatMetaPerc = document.getElementById("fatMetaPerc");
+    elFatMetaPerc.innerText = "🎯 " + metaFatPerc.toFixed(1).replace(".", ",") + "% da meta";
 
-  elFatMetaPerc.classList.remove("meta-ok", "meta-atencao", "meta-ruim");
-  if (metaFatPerc >= 100) elFatMetaPerc.classList.add("meta-ok");
-  else if (metaFatPerc >= 80) elFatMetaPerc.classList.add("meta-atencao");
-  else elFatMetaPerc.classList.add("meta-ruim");
+    elFatMetaPerc.classList.remove("meta-ok", "meta-atencao", "meta-ruim");
+    if (metaFatPerc >= 100) elFatMetaPerc.classList.add("meta-ok");
+    else if (metaFatPerc >= 80) elFatMetaPerc.classList.add("meta-atencao");
+    else elFatMetaPerc.classList.add("meta-ruim");
+  } else {
+    document.getElementById("fatMetaValor").innerText = "Meta mês: --";
+    document.getElementById("fatMetaPerc").innerText = "🎯 -- % da meta";
+  }
 
   /* ================= SLIDE 2 – KG TOTAL ================= */
-  document.getElementById("kgQtdAtual").innerText = qtd.atual + " pedidos";
-  document.getElementById("kgValorAtual").innerText = formatarKG(kg.atual) + " kg";
-  document.getElementById("kgDataAtual").innerText = "de " + fat.inicio_mes + " até " + fat.data_atual;
+  document.getElementById("kgQtdAtual").innerText = (qtd.atual ?? "--") + " pedidos";
+  document.getElementById("kgValorAtual").innerText = formatarNumero(kg.atual, 0) + " kg";
+  document.getElementById("kgDataAtual").innerText =
+    "de " + (fat.inicio_mes ?? "--") + " até " + (fat.data_atual ?? "--");
 
-  document.getElementById("kgQtdAnterior").innerText = qtd.ano_anterior + " pedidos";
-  document.getElementById("kgValorAnterior").innerText = formatarKG(kg.ano_anterior) + " kg";
-  document.getElementById("kgDataAnterior").innerText = "de " + fat.inicio_mes_anterior + " até " + fat.data_ano_anterior;
+  document.getElementById("kgQtdAnterior").innerText = (qtd.ano_anterior ?? "--") + " pedidos";
+  document.getElementById("kgValorAnterior").innerText = formatarNumero(kg.ano_anterior, 0) + " kg";
+  document.getElementById("kgDataAnterior").innerText =
+    "de " + (fat.inicio_mes_anterior ?? "--") + " até " + (fat.data_ano_anterior ?? "--");
 
   const elKgVar = document.getElementById("kgVariacao");
-  const pfKG = kg.variacao >= 0 ? "▲" : "▼";
-  elKgVar.innerText = `${pfKG} ${formatarPercentual(Math.abs(kg.variacao))} vs ano anterior`;
-  aplicarCorPosNeg(elKgVar, kg.variacao);
+  const pfKG = (kg.variacao ?? 0) >= 0 ? "▲" : "▼";
+  elKgVar.innerText = `${pfKG} ${formatarPercentual(Math.abs(kg.variacao ?? 0))} vs ano anterior`;
+  aplicarCorPosNeg(elKgVar, kg.variacao ?? 0);
 
-  /* ===== META KG (AGORA VOLTA A APARECER) ===== */
-  const metaKG = METAS[mes]?.kg ?? 0;
-  const metaKGperc = metaKG > 0 ? (kg.atual / metaKG) * 100 : 0;
+  /* ===== META KG (AGORA SEMPRE APARECE) ===== */
+  if (mes && METAS[mes]) {
+    const metaKG = METAS[mes].kg;
+    const metaKGperc = (kg.atual / metaKG) * 100;
 
-  document.getElementById("kgMetaValor").innerText =
-    metaKG > 0 ? ("Meta mês: " + formatarKG(metaKG) + " kg") : "Meta mês: --";
+    document.getElementById("kgMetaValor").innerText = "Meta mês: " + formatarNumero(metaKG, 0) + " kg";
+    document.getElementById("kgMetaPerc").innerText = "🎯 " + metaKGperc.toFixed(1).replace(".", ",") + "% da meta";
 
-  const elKgMetaPerc = document.getElementById("kgMetaPerc");
-  elKgMetaPerc.innerText =
-    metaKG > 0 ? ("🎯 " + metaKGperc.toFixed(1).replace(".", ",") + "% da meta") : "🎯 -- % da meta";
-
-  elKgMetaPerc.classList.remove("meta-ok", "meta-atencao", "meta-ruim");
-  if (metaKGperc >= 100) elKgMetaPerc.classList.add("meta-ok");
-  else if (metaKGperc >= 80) elKgMetaPerc.classList.add("meta-atencao");
-  else elKgMetaPerc.classList.add("meta-ruim");
+    const elKgMetaPerc = document.getElementById("kgMetaPerc");
+    elKgMetaPerc.classList.remove("meta-ok", "meta-atencao", "meta-ruim");
+    if (metaKGperc >= 100) elKgMetaPerc.classList.add("meta-ok");
+    else if (metaKGperc >= 80) elKgMetaPerc.classList.add("meta-atencao");
+    else elKgMetaPerc.classList.add("meta-ruim");
+  } else {
+    document.getElementById("kgMetaValor").innerText = "Meta mês: --";
+    document.getElementById("kgMetaPerc").innerText = "🎯 -- % da meta";
+  }
 
   /* ================= SLIDE 3 – TICKET MÉDIO ================= */
   document.getElementById("ticketAtual").innerText = formatarMoeda(ticket.atual);
   document.getElementById("ticketAnterior").innerText = formatarMoeda(ticket.ano_anterior);
 
-  document.getElementById("ticketQtdAtual").innerText = qtd.atual + " pedidos no período";
-  document.getElementById("ticketQtdAnterior").innerText = qtd.ano_anterior + " pedidos no período";
+  document.getElementById("ticketQtdAtual").innerText = (qtd.atual ?? "--") + " pedidos no período";
+  document.getElementById("ticketQtdAnterior").innerText = (qtd.ano_anterior ?? "--") + " pedidos no período";
 
   const elTicketVar = document.getElementById("ticketVariacao");
-  const pfT = ticket.variacao >= 0 ? "▲" : "▼";
-  elTicketVar.innerText = `${pfT} ${formatarPercentual(Math.abs(ticket.variacao))} vs ano anterior`;
-  aplicarCorPosNeg(elTicketVar, ticket.variacao);
+  const pfT = (ticket.variacao ?? 0) >= 0 ? "▲" : "▼";
+  elTicketVar.innerText = `${pfT} ${formatarPercentual(Math.abs(ticket.variacao ?? 0))} vs ano anterior`;
+  aplicarCorPosNeg(elTicketVar, ticket.variacao ?? 0);
 
-  /* ================= SLIDE 4 – PREÇO MÉDIO (4 CARDS EM 2 LINHAS) ================= */
-  if (preco && preco.atual && preco.ano_anterior) {
-    // 2026
-    document.getElementById("precoMedioKGAtual").innerText =
-      "R$ " + preco.atual.preco_medio_kg.toLocaleString("pt-BR");
-    document.getElementById("precoDataKGAtual").innerText =
-      "Atualizado até " + preco.atual.data;
+  /* ================= SLIDE 4 – PREÇO MÉDIO (ATUAL + ANO ANTERIOR) ================= */
+  // ATUAL
+  if (preco.atual) {
+    document.getElementById("precoMedioKG").innerText =
+      "R$ " + (preco.atual.preco_medio_kg ?? 0).toLocaleString("pt-BR");
 
-    document.getElementById("precoMedioM2Atual").innerText =
-      "R$ " + preco.atual.preco_medio_m2.toLocaleString("pt-BR");
-    document.getElementById("precoDataM2Atual").innerText =
-      "Atualizado até " + preco.atual.data;
+    document.getElementById("precoMedioM2").innerText =
+      "R$ " + (preco.atual.preco_medio_m2 ?? 0).toLocaleString("pt-BR");
 
-    // 2025
-    document.getElementById("precoMedioKGAnterior").innerText =
-      "R$ " + preco.ano_anterior.preco_medio_kg.toLocaleString("pt-BR");
-    document.getElementById("precoDataKGAnterior").innerText =
-      "Atualizado até " + preco.ano_anterior.data;
+    document.getElementById("precoDataKG").innerText =
+      "Atualizado até " + (preco.atual.data ?? "--");
 
-    document.getElementById("precoMedioM2Anterior").innerText =
-      "R$ " + preco.ano_anterior.preco_medio_m2.toLocaleString("pt-BR");
-    document.getElementById("precoDataM2Anterior").innerText =
-      "Atualizado até " + preco.ano_anterior.data;
+    document.getElementById("precoDataM2").innerText =
+      "Atualizado até " + (preco.atual.data ?? "--");
   }
 
+  // ANO ANTERIOR (SE EXISTIR NO JSON)
+  const elKgAnt = document.getElementById("precoMedioKGant");
+  const elM2Ant = document.getElementById("precoMedioM2ant");
+  const elDataKgAnt = document.getElementById("precoDataKGant");
+  const elDataM2Ant = document.getElementById("precoDataM2ant");
+
+  if (preco.ano_anterior && elKgAnt && elM2Ant && elDataKgAnt && elDataM2Ant) {
+    elKgAnt.innerText =
+      "R$ " + (preco.ano_anterior.preco_medio_kg ?? 0).toLocaleString("pt-BR");
+
+    elM2Ant.innerText =
+      "R$ " + (preco.ano_anterior.preco_medio_m2 ?? 0).toLocaleString("pt-BR");
+
+    elDataKgAnt.innerText =
+      "Atualizado até " + (preco.ano_anterior.data ?? "--");
+
+    elDataM2Ant.innerText =
+      "Atualizado até " + (preco.ano_anterior.data ?? "--");
+  }
 });
